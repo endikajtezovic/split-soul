@@ -25,7 +25,7 @@ const down = {}, hit = {};
 const K = {
   left: ['ArrowLeft', 'KeyA'], right: ['ArrowRight', 'KeyD'], up: ['ArrowUp', 'KeyW'], down: ['ArrowDown', 'KeyS'],
   dash: ['KeyZ', 'Space', 'KeyK'], atk: ['KeyX', 'KeyJ'], split: ['KeyC', 'KeyL', 'ShiftLeft', 'ShiftRight'],
-  start: ['Enter'], ch1: ['Digit1', 'Numpad1'], ch2: ['Digit2', 'Numpad2'], ch3: ['Digit3', 'Numpad3'], pause: ['KeyP', 'Escape'], mute: ['KeyM'],
+  start: ['Enter'], ch1: ['Digit1', 'Numpad1'], ch2: ['Digit2', 'Numpad2'], ch3: ['Digit3', 'Numpad3'], ch4: ['Digit4', 'Numpad4'], pause: ['KeyP', 'Escape'], mute: ['KeyM'],
 };
 const held = a => K[a].some(c => down[c]);
 const tap = a => K[a].some(c => hit[c]);
@@ -59,7 +59,10 @@ let waiters = [], dlg = null, cardWaiter = null, toastT = 0, locT = 0, marenSpir
 // ---------------------------------------------------------------- tiles
 const OUT_SOLID = new Set(['T', 'P', 'f', 'H', 'C', 'W', 'b', 'B', 'L', 'q', 'Y', 'r', 'l', 'D', 'X',
                            'p', 'w', 'k', 'S', 'A', 'E', 'R', 'Z', 'U', ' ', 'F', 'N', 'J', 'K',
-                           '~', 'h', 'O', 'V', 'x', 'u', 'n', 'Q', 'M', 'I', 'v', '+', '%', 'j', 'z', 'y', 'a', '!', '&', 'e']);
+                           '~', 'h', 'O', 'V', 'x', 'u', 'n', 'Q', 'M', 'I', 'v', '+', '%', 'j', 'z', 'y', 'a', '!', '&', 'e',
+                           '1', '2', '3', '4', '5', '6', '7', '8', '9', 'i', '*', '$', ':']);
+// chapters can add their own ground kinds, props and enemies
+const GROUND = {}, PROPS = {}, ENEMY_TYPES = {}, BUILDERS = {};
 const exitAt = (x, y, forSpirit) => A.exits.find(ex => {
   if (ex.veil ? !(forSpirit && ex.veil()) : false) return false;
   const along = ex.edge === 'xmin' || ex.edge === 'xmax' ? y : x;
@@ -100,6 +103,7 @@ function paintGround() {
   const G = A.grass || ['#62903e', '#567f36', '#4c7331', '#43692c'];
   const grass = (px, py) => { const n = lowf(px, py) + rnd() * 0.9; return n > 1.3 ? G[0] : n > 0.4 ? G[1] : n > -0.6 ? G[2] : G[3]; };
   const kindOf = ch => {
+    if (A.kind) { const k = A.kind(ch); if (k) return k; }
     if (ch === '~' || ch === 'h') return 'water';
     if (A.deck || ch === 'd' || ch === 'e' || ch === 'n') return 'deck';
     if (A.outdoor && 'xuVOQM'.includes(ch)) return 'stone';
@@ -141,6 +145,7 @@ function paintGround() {
           if (!seam && !grid && hash(px, py) % 97 === 0) col = '#6a6a72';
         }
         else if (kind === 'stone') col = (edge < 2 && rnd() < 0.4) ? grass(px, py) : ((px + py * 2) % 12 === 0 || (px - py * 2 + 400) % 12 === 0) ? '#56544e' : rnd() < 0.5 ? '#8e8c84' : '#9a988e';
+        else if (GROUND[kind]) col = GROUND[kind](px, py, fx, fy, x, y, rnd, ch, grass);
         else if (kind === 'soil') col = ((py * 2 - px + 400) % 8 < 2) ? '#45301f' : rnd() < 0.5 ? '#5c3f29' : '#64452d';
         else if (kind === 'floor') {
           const odd = (x + y) % 2, base = odd ? [56, 52, 58] : [40, 37, 44], v = (rnd() * 6 - 3) | 0;
@@ -260,7 +265,7 @@ function paintGround() {
 
 // interiors: the two back walls (x = 0 and y = 0), with windows and doorways cut in
 function paintWalls(g) {
-  const stone = A.wallStyle === 'plaster'
+  const stone = A.wallTex ? A.wallTex : A.wallStyle === 'plaster'
     ? (u, v) => (v < 22 ? stoneTex(['#6e6660', '#625a56', '#766e66'], '#3a3432', 10, 5)(u, v) : (u % 32 < 2 || v === 22 || v === 23 || v > WALL_H - 7) ? '#4a3426' : (hash(u, v) % 11 === 0 ? '#c4b694' : '#d4c6a4'))
     : A.wallStyle === 'cabin'
     ? (u, v) => v < 26 ? ((u % 20 === 0 || v === 25 || v === 0 || v % 13 === 0) ? '#3a2416' : (u % 20 < 2 ? '#6a4a2c' : '#5a3a24')) : v > WALL_H - 8 ? (v === WALL_H - 8 ? '#2a1a10' : '#4a2e1c') : (u % 8 === 0 ? '#b8a07a' : hash(u, v) % 17 === 0 ? '#c4ac84' : '#cdb890')
@@ -280,6 +285,7 @@ function paintWalls(g) {
     }
     for (const [k, wx] of (side === 'L' ? A.winL || [] : A.winR || []).entries()) {
       const du = (wc - wx) * 16;
+      if (A.wallTex) continue;
       if (A.wallStyle === 'iron' || A.wallStyle === 'cabin') { const dv = v - 46, dd = Math.hypot(du, dv); if (dd <= 7) return dd > 5.4 ? '#b08a4a' : (du - dv > 3 ? '#4a7a9a' : '#1e3a5a'); continue; }
       if (A.wallStyle === 'plaster') { if (Math.abs(du) <= 7 && v >= 30 && v < 57) { const c = homeWin(du, v); if (c) return c; } continue; }
       if (Math.abs(du) <= 7 && v >= 30 && v < 72) { const c = stainedGlass(Math.round(du + 7), v - 30, 15, 42, k * 5 + (side === 'L' ? 0 : 3)); if (c) return c; }
@@ -366,15 +372,17 @@ function buildStatics() {
       case 'a': add(windlassSpr.img, windlassSpr.ax, windlassSpr.ay); break;
       case '&': add(cowlSpr, 8, 29); break;
       case '!': statics.push({ ...o, draw: () => drawFlagstaff(Math.round(isoX(o.x, o.y) - camX), Math.round(isoY(o.x, o.y) - camY)) }); break;
+      default: if (PROPS[ch]) PROPS[ch](o, add, sx, sy, x, y, ch); break;
       case 'V': if (tileAt(x, y - 1) !== 'V') statics.push({ x: x + 0.5, y: y + 1, key: x + y + 2, img: lifeboatSpr, dx: isoX(x + 0.5, y + 1) - 32, dy: isoY(x + 0.5, y + 1) - 30, tall: true }); break;
     }
   }
-  for (const [key, build] of [['house', buildHouse], ['church', buildChurch], ['ship', buildShip], ['deckhouse', buildDeckhouse]]) {
-    if (!A[key]) continue;
-    const Hs = A[key], B = build(Hs);
+  const blds = [['house', buildHouse], ['church', buildChurch], ['ship', buildShip], ['deckhouse', buildDeckhouse]].filter(([k]) => A[k]).map(([k, f]) => [k, f, A[k]]);
+  for (const Bd of A.buildings || []) blds.push([Bd.type, BUILDERS[Bd.type], Bd]);
+  for (const [key, build, Hs] of blds) {
+    const B = Hs.cache || (Hs.cache = build(Hs));
     const bx = isoX(Hs.x0, Hs.y0), by = isoY(Hs.x0, Hs.y0);
     const lights = B.windows.map(([wx, wy, z, r = 34, a = 0.2]) => [isoX(Hs.x0 + wx, Hs.y0 + wy), isoY(Hs.x0 + wx, Hs.y0 + wy) - z, r, '255,190,100', a]);
-    statics.push({ bld: true, img: B.img, dx: bx + B.ox, dy: by + B.oy, x1: Hs.x0 + Hs.w + (key === 'church' ? 2 : 0), y1: Hs.y0 + Hs.d, lights,
+    statics.push({ bld: true, img: B.img, dx: bx + B.ox, dy: by + B.oy, x0: Hs.x0, y0: Hs.y0, x1: Hs.x0 + Hs.w + (key === 'church' ? 2 : 0), y1: Hs.y0 + Hs.d, lights,
                    chimneys: B.chimneys ? B.chimneys.map(([cx, cy, cz]) => [isoX(Hs.x0 + cx, Hs.y0 + cy), isoY(Hs.x0 + cx, Hs.y0 + cy) - cz]) : null,
                    chimney: B.chimney ? [isoX(Hs.x0 + B.chimney[0], Hs.y0 + B.chimney[1]), isoY(Hs.x0 + B.chimney[0], Hs.y0 + B.chimney[1]) - B.chimney[2]] : null });
   }
@@ -574,7 +582,7 @@ function damage(e, dmg, ux, uy, kb = 1) {
   e.hp -= dmg; e.flash = 6;
   if (!e.boss) {
     e.cd = 14; e.wind = 0; e.lunge = 0;
-    const k = (e.type === 'shade' ? 0.07 : 0.11) * kb; e.vx = ux * k; e.vy = uy * k;
+    const k = (e.type === 'shade' || e.soul ? 0.07 : 0.11) * kb; e.vx = ux * k; e.vy = uy * k;
   } else if (mode === 'spirit') energy = Math.min(100, energy + 1.5);
   burstW(e, 10, 6, ['#fff', '#ffd890'], 1.6);
   sfx('hit'); hitstop = 3; shake = Math.max(shake, 2);
@@ -587,7 +595,8 @@ function damage(e, dmg, ux, uy, kb = 1) {
 }
 function kill(e) {
   e.dead = true;
-  if (e.type === 'shade') burstW(e, 16, 20, ['#a8a4b8', '#dcd8e4', '#26222f'], 2.2, true, -0.02);
+  if (e.killCols) burstW(e, 16, 22, e.killCols, 2.2, true, -0.02);
+  else if (e.type === 'shade') burstW(e, 16, 20, ['#a8a4b8', '#dcd8e4', '#26222f'], 2.2, true, -0.02);
   else burstW(e, 8, 18, ['#7a1818', '#4a0c0c', e.type === 'cantor' ? '#5e1414' : '#6e6a5e'], 2.5);
   if (mode === 'spirit') energy = Math.min(100, energy + 4);
   sfx('kill');
@@ -605,6 +614,7 @@ function spawn(type, x, y, o = {}) {
   else if (type === 'warden') Object.assign(e, { r: 0.75, hp: 36, max: 36, phase: 'walk', pt: 100, cycle: -1, glow: 0, p2: false, rise: 70, boss: true, name: 'The Bellwarden' });
   else if (type === 'captain') Object.assign(e, { r: 0.85, hp: 30, max: 30, phase: 'walk', pt: 100, cycle: -1, glow: 0, p2: false, rise: 70, boss: true, name: 'The Drowned Anchor', spin: 0, alt: false,
                                                  ringCol: '120,230,210', summon: ['shade', { skin: 'sailor', sdmg: 8, windT: 40 }] });
+  if (ENEMY_TYPES[type]) Object.assign(e, ENEMY_TYPES[type].init());
   Object.assign(e, o);
   enemies.push(e); sfx('rise');
   return e;
@@ -686,6 +696,7 @@ function updateEnemies() {
   const bodyR = mode === 'body' ? b.r : 0.45;
   for (const e of enemies) {
     if (e.dead) continue;
+    if (ENEMY_TYPES[e.type]) { ENEMY_TYPES[e.type].update(e); if (state !== 'play') return; continue; }
     if (e.boss) { updateWarden(e); if (state !== 'play') return; continue; }
     if (e.flash > 0) e.flash--;
     e.anim++;
@@ -729,7 +740,7 @@ function updateEnemies() {
   }
   for (let i = 0; i < enemies.length; i++) for (let j = i + 1; j < enemies.length; j++) {
     const a = enemies[i], c = enemies[j];
-    if (a.type === 'shade' || c.type === 'shade' || a.rise > 0 || c.rise > 0) continue;
+    if (a.type === 'shade' || c.type === 'shade' || a.soul || c.soul || a.rise > 0 || c.rise > 0) continue;
     const d = wd(a, c), m = a.r + c.r;
     if (d < m && d > 0) {
       const wa = a.boss ? 0 : c.boss ? 1 : 0.5, p = m - d, ux = (a.x - c.x) / d, uy = (a.y - c.y) / d;
@@ -740,7 +751,7 @@ function updateEnemies() {
 function updateBolts() {
   for (const o of bolts) {
     o.x += o.vx; o.y += o.vy; o.life--;
-    if (t % 2 === 0) parts.push({ x: isoX(o.x, o.y), y: isoY(o.x, o.y) - 8, vx: 0, vy: 0, life: 12, col: o.brine ? '#3ac8a8' : '#c83020', grav: 0, sz: 1, glow: true });
+    if (t % 2 === 0) parts.push({ x: isoX(o.x, o.y), y: isoY(o.x, o.y) - 8, vx: 0, vy: 0, life: 12, col: o.c1 || (o.brine ? '#3ac8a8' : '#c83020'), grav: 0, sz: 1, glow: true });
     const c = tileAt(Math.floor(o.x), Math.floor(o.y));
     if (o.life <= 0 || c === 'X' || c === 'p' || c === 'S' || c === 'A') { o.dead = true; burstW(o, 8, 6, ['#f63', '#a20'], 1.2, true); continue; }
     if (s && !s.recall && wd(s, o) < s.r + 0.2) {
@@ -764,7 +775,7 @@ function resolveAttacks() {
     const P = { x: b.x + b.ax * 0.45, y: b.y + b.ay * 0.45 };
     for (const e of enemies) if (!e.dead && e.rise <= 0 && !b.hits.has(e.id) && wd(P, e) < 0.4 + e.r) {
       b.hits.add(e.id);
-      if (e.type === 'shade' || e.boss) { addText(e.x, e.y, 'IMMUNE', '#a8a4b8'); sfx('whiff'); }
+      if (e.type === 'shade' || e.boss || e.soul) { addText(e.x, e.y, 'IMMUNE', '#a8a4b8'); sfx('whiff'); }
       else damage(e, 1, b.ax, b.ay);
     }
   }
@@ -931,6 +942,7 @@ function update() {
   if (tap('mute')) { muted = !muted; if (master) master.gain.value = muted ? 0 : 0.5; }
   t++;
   if (state !== 'pause') tickWaiters();
+  if (A && A.tick && state !== 'pause' && state !== 'title') A.tick();
   fade += clamp(fadeTarget - fade, -0.045, 0.045);
   spiritK += ((mode === 'spirit' ? 1 : 0) - spiritK) * 0.06;
   if (whiteFlash > 0) whiteFlash = Math.max(0, whiteFlash - 0.02);
@@ -941,7 +953,7 @@ function update() {
       const n = CHAPTERS.length, prev = titleSel;
       if (tap('up')) titleSel = (titleSel + n - 1) % n;
       if (tap('down')) titleSel = (titleSel + 1) % n;
-      ['ch1', 'ch2', 'ch3'].forEach((k, i) => { if (tap(k) && i < n) titleSel = i; });
+      ['ch1', 'ch2', 'ch3', 'ch4'].forEach((k, i) => { if (tap(k) && i < n) titleSel = i; });
       if (titleSel !== prev) { sfx('blip'); renderTitle(); }
       if (tap('start')) { hideCard(); CHAPTERS[titleSel][2](); }
       break;
@@ -1027,6 +1039,7 @@ function drawBody() {
   }
 }
 function drawEnemy(e, glowLayer) {
+  if (ENEMY_TYPES[e.type]) { if (!glowLayer && ENEMY_TYPES[e.type].draw) ENEMY_TYPES[e.type].draw(e); return; }
   const x = SX(e), y = SY(e), fl = e.flash > 0, flip = e.face < 0;
   const jit = e.wind > 0 ? (t % 4 < 2 ? 1 : -1) : 0, tell = e.wind > 0 && e.wind < 10 && t % 3 === 0;
   if (e.type === 'shade') {
@@ -1109,23 +1122,38 @@ function draw() {
   const vis = statics.filter(o => o.draw || (o.dx - camX < W + 10 && o.dx - camX + o.img.width > -10 && o.dy - camY < H + 10 && o.dy - camY + o.img.height > -10));
   const dyn = [{ x: b.x, y: b.y, key: b.x + b.y, draw: drawBody }];
   if (goat) dyn.push({ x: goat.x, y: goat.y, key: goat.x + goat.y, draw: () => { shadowAt(SX(goat), SY(goat), 6); drawSpr(goatSpr, SX(goat) - 7, SY(goat) - 10, goat.face < 0); } });
-  for (const n of (A.npcs ? A.npcs() : [])) dyn.push({ x: n.x, y: n.y, key: n.x + n.y, draw: () => { if (n.draw) return n.draw(); shadowAt(SX(n), SY(n), n.ox ? 11 : 5); drawSpr(n.spr, SX(n) - (n.ox || 6), SY(n) - (n.oy || 19), n.face < 0); } });
+  for (const n of (A.npcs ? A.npcs() : [])) dyn.push({ x: n.x, y: n.y, key: n.x + n.y, big: n.big, draw: () => { if (n.draw) return n.draw(); shadowAt(SX(n), SY(n), n.ox ? 11 : 5); drawSpr(n.spr, SX(n) - (n.ox || 6), SY(n) - (n.oy || 19), n.face < 0); } });
   if (A.maren && !flags.marenAwake) dyn.push({ x: A.maren.x, y: A.maren.y, key: A.maren.x + A.maren.y, draw: () => drawSpr(SPR.marenLie, SX(A.maren) - 12, SY(A.maren) - 6, true) });
-  for (const e of enemies) dyn.push({ x: e.x, y: e.y, key: e.x + e.y, draw: () => drawEnemy(e) });
+  for (const e of enemies) dyn.push({ x: e.x, y: e.y, key: e.x + e.y, big: e.boss ? 30 : 0, draw: () => drawEnemy(e) });
   for (const p of pickups) dyn.push({ x: p.x, y: p.y, key: p.x + p.y, draw: () => drawPickup(p) });
   for (const o of bolts) dyn.push({ x: o.x, y: o.y, key: o.x + o.y, draw: () => {
-    ctx.fillStyle = o.brine ? '#2a8a7a' : '#c83020'; ctx.fillRect(Math.round(SX(o) - 2), Math.round(SY(o) - 10), 4, 4); ctx.fillStyle = o.brine ? '#c8fff0' : '#ffd0a0'; ctx.fillRect(Math.round(SX(o) - 1), Math.round(SY(o) - 9), 2, 2);
+    ctx.fillStyle = o.c1 || (o.brine ? '#2a8a7a' : '#c83020'); ctx.fillRect(Math.round(SX(o) - 2), Math.round(SY(o) - 10), 4, 4); ctx.fillStyle = o.c2 || (o.brine ? '#c8fff0' : '#ffd0a0'); ctx.fillRect(Math.round(SX(o) - 1), Math.round(SY(o) - 9), 2, 2);
   } });
-  const bl = statics.find(o => o.bld), byKey = (a, c) => a.key - c.key;
-  const rest = vis.concat(dyn).filter(o => !o.bld);
-  const inFront = o => !bl || o.x >= bl.x1 || o.y >= bl.y1;
-  const all = bl ? [...rest.filter(o => !inFront(o)).sort(byKey), bl, ...rest.filter(inFront).sort(byKey)] : rest.sort(byKey);
+  // depth order: small things by x + y; each building slots in after whatever stands behind it and overlaps it on screen
+  const byKey = (a, c) => a.key - c.key;
+  const blds = vis.filter(o => o.bld).sort((a, c) => (a.x1 + a.y1) - (c.x1 + c.y1));
+  const all = vis.concat(dyn).filter(o => !o.bld).sort(byKey);
+  const rectOf = o => o.bld || o.img ? [o.dx, o.dy, o.dx + o.img.width, o.dy + o.img.height] : [isoX(o.x, o.y) - (o.big || 14), isoY(o.x, o.y) - (o.big ? o.big * 2.4 : 50), isoX(o.x, o.y) + (o.big || 14), isoY(o.x, o.y) + 6];
+  const inFrontOf = (o, B) => o.bld ? (o.x0 >= B.x1 || o.y0 >= B.y1) : (o.x >= B.x1 || o.y >= B.y1);
+  for (const B of blds) {
+    const bx0 = B.dx, bx1 = B.dx + B.img.width, by0 = B.dy, by1 = B.dy + B.img.height;
+    let lastBehind = -1;
+    const fronts = [];
+    all.forEach((o, i) => {
+      const r = rectOf(o); if (r[0] >= bx1 || r[2] <= bx0 || r[1] >= by1 || r[3] <= by0) return;
+      if (inFrontOf(o, B)) fronts.push(i); else lastBehind = i;
+    });
+    const moved = fronts.filter(i => i < lastBehind).map(i => all[i]);
+    const at = lastBehind + 1;
+    all.splice(at, 0, B, ...moved);
+    for (const m of moved) all.splice(all.indexOf(m), 1);
+  }
   const ax = SX(active), ay = SY(active), akey = active.x + active.y;
   for (const o of all) {
     if (o.draw) { o.draw(); continue; }
     if (o.gate && gateOpen()) continue;
     let alpha = 1; const ox = o.dx - camX, oy = o.dy - camY;
-    if (o.bld) { if (!inFront(active) && ax > ox + 6 && ax < ox + o.img.width - 6 && ay > oy && ay < oy + o.img.height) alpha = 0.4; }
+    if (o.bld) { if (!inFrontOf(active, o) && ax > ox + 6 && ax < ox + o.img.width - 6 && ay > oy && ay < oy + o.img.height) alpha = 0.4; }
     else if (o.tall && o.key > akey && Math.abs(ax - (ox + o.img.width / 2)) < o.img.width / 2 && ay > oy && ay < oy + o.img.height) alpha = 0.45;
     ctx.globalAlpha = alpha; ctx.drawImage(o.img, Math.round(ox), Math.round(oy)); ctx.globalAlpha = 1;
   }
@@ -1154,11 +1182,11 @@ function draw() {
     if (circleFlare > 0) L.push([cx2, cy2, 70 + 90 * circleFlare, '240,200,120', 0.45 * circleFlare]);
   }
   if (marenSpirit) L.push([isoX(marenSpirit.x, marenSpirit.y), isoY(marenSpirit.x, marenSpirit.y) - 18, 90 * marenSpirit.a, marenSpirit.col || '255,220,160', 0.2 * marenSpirit.a]);
-  for (const o of bolts) L.push([isoX(o.x, o.y), isoY(o.x, o.y) - 8, 24, o.brine ? '60,220,190' : '255,70,40', 0.35]);
+  for (const o of bolts) L.push([isoX(o.x, o.y), isoY(o.x, o.y) - 8, 24, o.light || (o.brine ? '60,220,190' : '255,70,40'), 0.35]);
   if (A.lights) L.push(...A.lights());
   for (const e of enemies) {
     if (e.type === 'cantor' && e.fire < 40 && e.rise <= 0) L.push([isoX(e.x, e.y), isoY(e.x, e.y) - 22, 20, '255,120,40', 0.3]);
-    if (e.boss) L.push([isoX(e.x, e.y), isoY(e.x, e.y) - 30, 30 + 40 * e.glow, e.type === 'captain' ? '90,230,200' : '255,170,80', 0.08 + 0.25 * e.glow]);
+    if (e.boss) L.push([isoX(e.x, e.y), isoY(e.x, e.y) - 30, 30 + 40 * e.glow, e.lightCol || (e.type === 'captain' ? '90,230,200' : '255,170,80'), 0.08 + 0.25 * e.glow]);
   }
   for (const p of pickups) L.push([isoX(p.x, p.y), isoY(p.x, p.y) - 12, 16, p.type === 'orb' ? '90,230,255' : '255,140,60', 0.2]);
   for (const ex of A.exits) if (ex.veil && ex.veil()) { const m2 = ex.edge === 'xmin' ? [0, (ex.a + ex.b) / 2] : [(ex.a + ex.b) / 2, 0]; L.push([isoX(m2[0], m2[1]), isoY(m2[0], m2[1]) - 30, 50, '90,230,255', 0.14]); }
@@ -1222,7 +1250,7 @@ function draw() {
   }
   if (A.glow) A.glow();
   if (s) drawSpirit();
-  if (marenSpirit) drawSpr(marenSpirit.spr || SPR.marenSpirit, SX(marenSpirit) - 6, SY(marenSpirit) - 36 + Math.sin(t * 0.05) * 2, false, { alpha: marenSpirit.a * 0.92, glow: true });
+  if (marenSpirit) { const sc = marenSpirit.scale || 1; drawSpr(marenSpirit.spr || SPR.marenSpirit, SX(marenSpirit) - 6 * sc, SY(marenSpirit) - 36 * sc + Math.sin(t * 0.05) * 2, false, { alpha: marenSpirit.a * 0.92, glow: true, scale: sc }); }
   for (const p of parts) if (p.glow) { ctx.globalAlpha = Math.min(1, p.life / 12); ctx.fillStyle = p.col; ctx.fillRect(Math.round(p.x - camX), Math.round(p.y - camY), p.sz, p.sz); }
   ctx.globalAlpha = 0.045;
   const gx = Math.random() * 128 | 0, gy = Math.random() * 128 | 0;
@@ -1262,6 +1290,7 @@ const CHAPTERS = [
   ['I', 'The Silent Bell', () => startGame()],
   ['II', "Her Mother's Blade", () => startChapter2()],
   ['III', 'The Drowned Captain', () => startChapter3()],
+  ['IV', 'The Cloudwater Baths', () => startChapter4()],
 ];
 let titleSel = 0;
 function renderTitle() {
